@@ -1,4 +1,6 @@
-> ROS2 Fork repo maintainer: [Ericsiii](https://github.com/Ericsii)
+> Code source: [Ericsiii/FAST_LIO_ROS2](https://github.com/Ericsii/FAST_LIO_ROS2)
+>
+> This repository adds gravity-aligned horizontal odometry output with the `odom -> base_link` transform.
 
 ## Related Works and Extended Application
 
