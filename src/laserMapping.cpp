@@ -95,8 +95,16 @@ bool base_output_publish_odom = true;
 bool base_output_publish_tf = true;
 bool base_output_gravity_align = true;
 bool base_output_gravity_align_fixed_once = true;
+bool base_output_publish_aligned_cloud = true;
+bool base_output_publish_aligned_map = true;
+bool base_output_publish_aligned_path = true;
+bool base_output_save_aligned_map = true;
 
 std::string base_output_odom_topic = "/nav_odom";
+std::string aligned_cloud_topic = "/cloud_registered_aligned";
+std::string aligned_map_topic = "/Laser_map_aligned";
+std::string aligned_path_topic = "/path_aligned";
+std::string aligned_map_save_suffix = "_aligned";
 
 double res_mean_last = 0.05, total_residual = 0.0;
 double last_timestamp_lidar = 0, last_timestamp_imu = -1.0;
@@ -147,10 +155,14 @@ state_ikfom state_point;
 vect3 pos_lid;
 
 nav_msgs::msg::Path path;
+nav_msgs::msg::Path path_aligned;
 nav_msgs::msg::Odometry odomAftMapped;
 geometry_msgs::msg::Quaternion geoQuat;
 geometry_msgs::msg::PoseStamped msg_body_pose;
 rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPtr pubBaseOdom;
+rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudFullResAligned;
+rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudMapAligned;
+rclcpp::Publisher<nav_msgs::msg::Path>::SharedPtr pubPathAligned;
 
 V3D base_to_lio_t = V3D::Zero();
 M3D base_to_lio_R = M3D::Identity();
@@ -502,8 +514,82 @@ void map_incremental()
     kdtree_incremental_time = omp_get_wtime() - st_time;
 }
 
+void init_gravity_alignment();
+
 PointCloudXYZI::Ptr pcl_wait_pub(new PointCloudXYZI());
 PointCloudXYZI::Ptr pcl_wait_save(new PointCloudXYZI());
+
+void transform_cloud_to_aligned_world(const PointCloudXYZI::Ptr &src, PointCloudXYZI::Ptr &dst)
+{
+    dst->clear();
+    dst->reserve(src->size());
+
+    for (const auto &pt : src->points)
+    {
+        V3D p(pt.x, pt.y, pt.z);
+        V3D p_aligned = gravity_align_R * p;
+
+        PointType q = pt;
+        q.x = p_aligned.x();
+        q.y = p_aligned.y();
+        q.z = p_aligned.z();
+
+        dst->points.push_back(q);
+    }
+
+    dst->width = dst->points.size();
+    dst->height = 1;
+    dst->is_dense = src->is_dense;
+}
+
+void publish_frame_world_aligned(
+    const rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr &pub,
+    const PointCloudXYZI::Ptr &laserCloudWorld)
+{
+    if (!base_output_enable || !base_output_publish_aligned_cloud || !pub)
+    {
+        return;
+    }
+
+    if (base_output_gravity_align && (!gravity_align_initialized || !base_output_gravity_align_fixed_once))
+    {
+        init_gravity_alignment();
+    }
+
+    PointCloudXYZI::Ptr cloud_aligned(new PointCloudXYZI());
+    transform_cloud_to_aligned_world(laserCloudWorld, cloud_aligned);
+
+    sensor_msgs::msg::PointCloud2 msg;
+    pcl::toROSMsg(*cloud_aligned, msg);
+    msg.header.stamp = get_ros_time(lidar_end_time);
+    msg.header.frame_id = odom_frame;
+
+    pub->publish(msg);
+}
+
+void publish_map_aligned(const rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr &pub)
+{
+    if (!base_output_enable || !base_output_publish_aligned_map || !pub)
+    {
+        return;
+    }
+
+    if (base_output_gravity_align && (!gravity_align_initialized || !base_output_gravity_align_fixed_once))
+    {
+        init_gravity_alignment();
+    }
+
+    PointCloudXYZI::Ptr map_aligned(new PointCloudXYZI());
+    transform_cloud_to_aligned_world(pcl_wait_pub, map_aligned);
+
+    sensor_msgs::msg::PointCloud2 msg;
+    pcl::toROSMsg(*map_aligned, msg);
+    msg.header.stamp = get_ros_time(lidar_end_time);
+    msg.header.frame_id = odom_frame;
+
+    pub->publish(msg);
+}
+
 void publish_frame_world(rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudFull)
 {
     if(scan_pub_en)
@@ -525,6 +611,7 @@ void publish_frame_world(rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::Share
         laserCloudmsg.header.stamp = get_ros_time(lidar_end_time);
         laserCloudmsg.header.frame_id = "camera_init";
         pubLaserCloudFull->publish(laserCloudmsg);
+        publish_frame_world_aligned(pubLaserCloudFullResAligned, laserCloudWorld);
         publish_count -= PUBFRAME_PERIOD;
     }
 
@@ -616,6 +703,7 @@ void publish_map(rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pub
     laserCloudmsg.header.stamp = get_ros_time(lidar_end_time);
     laserCloudmsg.header.frame_id = "camera_init";
     pubLaserCloudMap->publish(laserCloudmsg);
+    publish_map_aligned(pubLaserCloudMapAligned);
 
     // sensor_msgs::msg::PointCloud2 laserCloudMap;
     // pcl::toROSMsg(*featsFromMap, laserCloudMap);
@@ -628,6 +716,31 @@ void save_to_pcd()
 {
     pcl::PCDWriter pcd_writer;
     pcd_writer.writeBinary(map_file_path, *pcl_wait_pub);
+
+    if (base_output_enable && base_output_save_aligned_map)
+    {
+        if (base_output_gravity_align && (!gravity_align_initialized || !base_output_gravity_align_fixed_once))
+        {
+            init_gravity_alignment();
+        }
+
+        PointCloudXYZI::Ptr map_aligned(new PointCloudXYZI());
+        transform_cloud_to_aligned_world(pcl_wait_pub, map_aligned);
+
+        std::string aligned_map_file_path = map_file_path;
+        const std::string::size_type dot_pos = aligned_map_file_path.find_last_of('.');
+        const std::string::size_type sep_pos = aligned_map_file_path.find_last_of("/\\");
+        if (dot_pos != std::string::npos && (sep_pos == std::string::npos || dot_pos > sep_pos))
+        {
+            aligned_map_file_path.insert(dot_pos, aligned_map_save_suffix);
+        }
+        else
+        {
+            aligned_map_file_path += aligned_map_save_suffix + ".pcd";
+        }
+
+        pcd_writer.writeBinary(aligned_map_file_path, *map_aligned);
+    }
 }
 
 template<typename T>
@@ -778,6 +891,27 @@ void publish_odometry(const rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPt
             base_tf.transform.rotation.w = q_base.w();
 
             tf_br->sendTransform(base_tf);
+        }
+
+        if (base_output_publish_aligned_path && pubPathAligned)
+        {
+            geometry_msgs::msg::PoseStamped pose_stamped;
+            pose_stamped.header.stamp = odomAftMapped.header.stamp;
+            pose_stamped.header.frame_id = odom_frame;
+
+            pose_stamped.pose.position.x = base_pos(0);
+            pose_stamped.pose.position.y = base_pos(1);
+            pose_stamped.pose.position.z = base_pos(2);
+            pose_stamped.pose.orientation.x = q_base.x();
+            pose_stamped.pose.orientation.y = q_base.y();
+            pose_stamped.pose.orientation.z = q_base.z();
+            pose_stamped.pose.orientation.w = q_base.w();
+
+            path_aligned.header.stamp = pose_stamped.header.stamp;
+            path_aligned.header.frame_id = odom_frame;
+            path_aligned.poses.push_back(pose_stamped);
+
+            pubPathAligned->publish(path_aligned);
         }
     }
 }
@@ -941,7 +1075,15 @@ public:
         this->declare_parameter<bool>("base_output.publish_tf", true);
         this->declare_parameter<bool>("base_output.gravity_align", true);
         this->declare_parameter<bool>("base_output.gravity_align_fixed_once", true);
+        this->declare_parameter<bool>("base_output.publish_aligned_cloud", true);
+        this->declare_parameter<bool>("base_output.publish_aligned_map", true);
+        this->declare_parameter<bool>("base_output.publish_aligned_path", true);
+        this->declare_parameter<bool>("base_output.save_aligned_map", true);
         this->declare_parameter<string>("base_output.odom_topic", "/nav_odom");
+        this->declare_parameter<string>("base_output.aligned_cloud_topic", "/cloud_registered_aligned");
+        this->declare_parameter<string>("base_output.aligned_map_topic", "/Laser_map_aligned");
+        this->declare_parameter<string>("base_output.aligned_path_topic", "/path_aligned");
+        this->declare_parameter<string>("base_output.aligned_map_save_suffix", "_aligned");
         this->declare_parameter<vector<double>>("base_output.base_to_lio_trans", vector<double>{0.0, 0.0, 0.0});
         this->declare_parameter<vector<double>>("base_output.base_to_lio_rpy", vector<double>{0.0, 0.0, 0.0});
         this->declare_parameter<double>("filter_size_corner", 0.5);
@@ -987,7 +1129,15 @@ public:
         this->get_parameter_or<bool>("base_output.publish_tf", base_output_publish_tf, true);
         this->get_parameter_or<bool>("base_output.gravity_align", base_output_gravity_align, true);
         this->get_parameter_or<bool>("base_output.gravity_align_fixed_once", base_output_gravity_align_fixed_once, true);
+        this->get_parameter_or<bool>("base_output.publish_aligned_cloud", base_output_publish_aligned_cloud, true);
+        this->get_parameter_or<bool>("base_output.publish_aligned_map", base_output_publish_aligned_map, true);
+        this->get_parameter_or<bool>("base_output.publish_aligned_path", base_output_publish_aligned_path, true);
+        this->get_parameter_or<bool>("base_output.save_aligned_map", base_output_save_aligned_map, true);
         this->get_parameter_or<string>("base_output.odom_topic", base_output_odom_topic, "/nav_odom");
+        this->get_parameter_or<string>("base_output.aligned_cloud_topic", aligned_cloud_topic, "/cloud_registered_aligned");
+        this->get_parameter_or<string>("base_output.aligned_map_topic", aligned_map_topic, "/Laser_map_aligned");
+        this->get_parameter_or<string>("base_output.aligned_path_topic", aligned_path_topic, "/path_aligned");
+        this->get_parameter_or<string>("base_output.aligned_map_save_suffix", aligned_map_save_suffix, "_aligned");
         this->get_parameter_or<double>("filter_size_corner",filter_size_corner_min,0.5);
         this->get_parameter_or<double>("filter_size_surf",filter_size_surf_min,0.5);
         this->get_parameter_or<double>("filter_size_map",filter_size_map_min,0.5);
@@ -1047,6 +1197,8 @@ public:
 
         path.header.stamp = this->get_clock()->now();
         path.header.frame_id ="camera_init";
+        path_aligned.header.stamp = this->get_clock()->now();
+        path_aligned.header.frame_id = odom_frame;
 
         // /*** variables definition ***/
         // int effect_feat_num = 0, frame_num = 0;
@@ -1108,6 +1260,19 @@ public:
         if (base_output_enable && base_output_publish_odom)
         {
             pubBaseOdom = this->create_publisher<nav_msgs::msg::Odometry>(base_output_odom_topic, 10);
+        }
+        if (base_output_enable && base_output_publish_aligned_cloud)
+        {
+            pubLaserCloudFullResAligned = this->create_publisher<sensor_msgs::msg::PointCloud2>(aligned_cloud_topic, 10);
+        }
+        if (base_output_enable && base_output_publish_aligned_map)
+        {
+            pubLaserCloudMapAligned = this->create_publisher<sensor_msgs::msg::PointCloud2>(aligned_map_topic, 10);
+        }
+        if (base_output_enable && base_output_publish_aligned_path)
+        {
+            pubPathAligned = this->create_publisher<nav_msgs::msg::Path>(aligned_path_topic, 10);
+            path_aligned.header.frame_id = odom_frame;
         }
         pubPath_ = this->create_publisher<nav_msgs::msg::Path>("/path", 20);
         tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*this);

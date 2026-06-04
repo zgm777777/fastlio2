@@ -25,6 +25,12 @@ def generate_launch_description():
     base_output_gravity_align = LaunchConfiguration('base_output_gravity_align')
     base_output_publish_tf = LaunchConfiguration('base_output_publish_tf')
     base_output_publish_odom = LaunchConfiguration('base_output_publish_odom')
+    publish_aligned_cloud = LaunchConfiguration('publish_aligned_cloud')
+    publish_aligned_map = LaunchConfiguration('publish_aligned_map')
+    publish_aligned_path = LaunchConfiguration('publish_aligned_path')
+    aligned_cloud_topic = LaunchConfiguration('aligned_cloud_topic')
+    aligned_map_topic = LaunchConfiguration('aligned_map_topic')
+    aligned_path_topic = LaunchConfiguration('aligned_path_topic')
     base_to_lio_x = LaunchConfiguration('base_to_lio_x')
     base_to_lio_y = LaunchConfiguration('base_to_lio_y')
     base_to_lio_z = LaunchConfiguration('base_to_lio_z')
@@ -44,6 +50,12 @@ def generate_launch_description():
             return None
         return float(value)
 
+    def optional_string(context, launch_config):
+        value = launch_config.perform(context).strip()
+        if value == '':
+            return None
+        return value
+
     def launch_setup(context, *args, **kwargs):
         parameter_files = [
             PathJoinSubstitution([config_path, config_file]),
@@ -56,9 +68,22 @@ def generate_launch_description():
             (base_output_gravity_align, 'base_output.gravity_align'),
             (base_output_publish_tf, 'base_output.publish_tf'),
             (base_output_publish_odom, 'base_output.publish_odom'),
+            (publish_aligned_cloud, 'base_output.publish_aligned_cloud'),
+            (publish_aligned_map, 'base_output.publish_aligned_map'),
+            (publish_aligned_path, 'base_output.publish_aligned_path'),
         )
         for launch_config, parameter_name in bool_overrides:
             value = optional_bool(context, launch_config)
+            if value is not None:
+                overrides[parameter_name] = value
+
+        string_overrides = (
+            (aligned_cloud_topic, 'base_output.aligned_cloud_topic'),
+            (aligned_map_topic, 'base_output.aligned_map_topic'),
+            (aligned_path_topic, 'base_output.aligned_path_topic'),
+        )
+        for launch_config, parameter_name in string_overrides:
+            value = optional_string(context, launch_config)
             if value is not None:
                 overrides[parameter_name] = value
 
@@ -132,6 +157,30 @@ def generate_launch_description():
         'base_output_publish_odom', default_value='',
         description='Optional override for base_output.publish_odom'
     )
+    declare_publish_aligned_cloud_cmd = DeclareLaunchArgument(
+        'publish_aligned_cloud', default_value='',
+        description='Optional override for base_output.publish_aligned_cloud'
+    )
+    declare_publish_aligned_map_cmd = DeclareLaunchArgument(
+        'publish_aligned_map', default_value='',
+        description='Optional override for base_output.publish_aligned_map'
+    )
+    declare_publish_aligned_path_cmd = DeclareLaunchArgument(
+        'publish_aligned_path', default_value='',
+        description='Optional override for base_output.publish_aligned_path'
+    )
+    declare_aligned_cloud_topic_cmd = DeclareLaunchArgument(
+        'aligned_cloud_topic', default_value='',
+        description='Optional override for base_output.aligned_cloud_topic'
+    )
+    declare_aligned_map_topic_cmd = DeclareLaunchArgument(
+        'aligned_map_topic', default_value='',
+        description='Optional override for base_output.aligned_map_topic'
+    )
+    declare_aligned_path_topic_cmd = DeclareLaunchArgument(
+        'aligned_path_topic', default_value='',
+        description='Optional override for base_output.aligned_path_topic'
+    )
     declare_base_to_lio_x_cmd = DeclareLaunchArgument(
         'base_to_lio_x', default_value='',
         description='Optional override for base_output.base_to_lio_trans[0]'
@@ -167,6 +216,12 @@ def generate_launch_description():
     ld.add_action(declare_base_output_gravity_align_cmd)
     ld.add_action(declare_base_output_publish_tf_cmd)
     ld.add_action(declare_base_output_publish_odom_cmd)
+    ld.add_action(declare_publish_aligned_cloud_cmd)
+    ld.add_action(declare_publish_aligned_map_cmd)
+    ld.add_action(declare_publish_aligned_path_cmd)
+    ld.add_action(declare_aligned_cloud_topic_cmd)
+    ld.add_action(declare_aligned_map_topic_cmd)
+    ld.add_action(declare_aligned_path_topic_cmd)
     ld.add_action(declare_base_to_lio_x_cmd)
     ld.add_action(declare_base_to_lio_y_cmd)
     ld.add_action(declare_base_to_lio_z_cmd)

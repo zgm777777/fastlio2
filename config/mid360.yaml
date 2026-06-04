@@ -25,6 +25,14 @@
             odom_topic: "/nav_odom"
             gravity_align: true
             gravity_align_fixed_once: true
+            publish_aligned_cloud: true
+            publish_aligned_map: true
+            publish_aligned_path: true
+            aligned_cloud_topic: "/cloud_registered_aligned"
+            aligned_map_topic: "/Laser_map_aligned"
+            aligned_path_topic: "/path_aligned"
+            save_aligned_map: true
+            aligned_map_save_suffix: "_aligned"
             base_to_lio_trans: [0.0, 0.0, 0.0]
             base_to_lio_rpy: [0.0, 0.0, 0.0]
 
