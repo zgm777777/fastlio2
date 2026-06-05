@@ -556,10 +556,12 @@ void transform_cloud_to_base_frame(const PointCloudXYZI::Ptr &src_lidar, PointCl
 
         // feats_undistort is in the LiDAR frame. Convert only through fixed
         // mounting extrinsics: LiDAR -> FAST-LIO IMU/body -> base_link.
+        // base_to_lio_R/base_to_lio_t is used in the direction that matches
+        // the existing /nav_odom base_link pose chain.
         // gravity_align_R is a world-frame alignment and must not be applied
         // to this local base_link cloud.
         V3D p_imu = state_point.offset_R_L_I * p_lidar + state_point.offset_T_L_I;
-        V3D p_base = base_to_lio_R.transpose() * (p_imu - base_to_lio_t);
+        V3D p_base = base_to_lio_R * p_imu + base_to_lio_t;
 
         PointType q = pt;
         q.x = p_base.x();
