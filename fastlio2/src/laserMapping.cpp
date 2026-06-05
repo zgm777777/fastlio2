@@ -808,6 +808,9 @@ void set_posestamp(T & out)
 
 void init_gravity_alignment()
 {
+    static bool gravity_debug_printed = false;
+    static bool gravity_debug_small_norm_printed = false;
+
     if (!base_output_gravity_align)
     {
         gravity_align_R = M3D::Identity();
@@ -823,9 +826,35 @@ void init_gravity_alignment()
     V3D grav = state_point.grav;
     if (grav.norm() < 1e-3)
     {
-        RCLCPP_WARN(rclcpp::get_logger("laser_mapping"), "Gravity vector norm is too small, keep identity gravity alignment for this frame.");
+        if (!gravity_debug_small_norm_printed)
+        {
+            RCLCPP_WARN(rclcpp::get_logger("laser_mapping"),
+                        "[gravity_align_debug] grav norm too small: grav=[%.6f, %.6f, %.6f], norm=%.6f",
+                        grav.x(), grav.y(), grav.z(), grav.norm());
+            gravity_debug_small_norm_printed = true;
+        }
         gravity_align_R = M3D::Identity();
         return;
+    }
+
+    if (!gravity_debug_printed)
+    {
+        V3D grav_norm = grav.normalized();
+        V3D up_by_neg_grav = -grav_norm;
+        V3D up_by_pos_grav = grav_norm;
+
+        RCLCPP_INFO(rclcpp::get_logger("laser_mapping"),
+                    "[gravity_align_debug] grav = [%.6f, %.6f, %.6f], norm = %.6f",
+                    grav.x(), grav.y(), grav.z(), grav.norm());
+        RCLCPP_INFO(rclcpp::get_logger("laser_mapping"),
+                    "[gravity_align_debug] grav.normalized = [%.6f, %.6f, %.6f]",
+                    grav_norm.x(), grav_norm.y(), grav_norm.z());
+        RCLCPP_INFO(rclcpp::get_logger("laser_mapping"),
+                    "[gravity_align_debug] -grav.normalized = [%.6f, %.6f, %.6f]",
+                    up_by_neg_grav.x(), up_by_neg_grav.y(), up_by_neg_grav.z());
+        RCLCPP_INFO(rclcpp::get_logger("laser_mapping"),
+                    "[gravity_align_debug] +grav.normalized = [%.6f, %.6f, %.6f]",
+                    up_by_pos_grav.x(), up_by_pos_grav.y(), up_by_pos_grav.z());
     }
 
     bool was_initialized = gravity_align_initialized;
@@ -835,6 +864,18 @@ void init_gravity_alignment()
 
     gravity_align_R = q_align.toRotationMatrix();
     gravity_align_initialized = true;
+    if (!gravity_debug_printed)
+    {
+        RCLCPP_INFO(rclcpp::get_logger("laser_mapping"),
+                    "[gravity_align_debug] selected up_lio = [%.6f, %.6f, %.6f]",
+                    up_lio.x(), up_lio.y(), up_lio.z());
+        RCLCPP_INFO(rclcpp::get_logger("laser_mapping"),
+                    "[gravity_align_debug] gravity_align_R = [[%.6f %.6f %.6f], [%.6f %.6f %.6f], [%.6f %.6f %.6f]]",
+                    gravity_align_R(0, 0), gravity_align_R(0, 1), gravity_align_R(0, 2),
+                    gravity_align_R(1, 0), gravity_align_R(1, 1), gravity_align_R(1, 2),
+                    gravity_align_R(2, 0), gravity_align_R(2, 1), gravity_align_R(2, 2));
+        gravity_debug_printed = true;
+    }
     if (!was_initialized)
     {
         RCLCPP_INFO(rclcpp::get_logger("laser_mapping"), "Gravity alignment initialized for base output.");
