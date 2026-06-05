@@ -35,6 +35,9 @@
             aligned_path_topic: "/path_aligned"
             save_aligned_map: true
             aligned_map_save_suffix: "_aligned"
+            # Fixed extrinsic T_base_imu: base_link -> FAST-LIO IMU/body state frame.
+            # Used to derive base_link odometry from FAST-LIO state and to convert
+            # LiDAR local points through LiDAR->IMU/body into base_link local points.
             base_to_lio_trans: [0.0, 0.0, 0.0]
             base_to_lio_rpy: [0.0, 0.0, 0.0]
 

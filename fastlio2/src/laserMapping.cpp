@@ -545,15 +545,21 @@ void transform_cloud_to_aligned_world(const PointCloudXYZI::Ptr &src, PointCloud
     dst->is_dense = src->is_dense;
 }
 
-void transform_cloud_lio_to_base(const PointCloudXYZI::Ptr &src_lio, PointCloudXYZI::Ptr &dst_base)
+void transform_cloud_to_base_frame(const PointCloudXYZI::Ptr &src_lidar, PointCloudXYZI::Ptr &dst_base)
 {
     dst_base->clear();
-    dst_base->reserve(src_lio->size());
+    dst_base->reserve(src_lidar->size());
 
-    for (const auto &pt : src_lio->points)
+    for (const auto &pt : src_lidar->points)
     {
-        V3D p_lio(pt.x, pt.y, pt.z);
-        V3D p_base = base_to_lio_R.transpose() * (p_lio - base_to_lio_t);
+        V3D p_lidar(pt.x, pt.y, pt.z);
+
+        // feats_undistort is in the LiDAR frame. Convert only through fixed
+        // mounting extrinsics: LiDAR -> FAST-LIO IMU/body -> base_link.
+        // gravity_align_R is a world-frame alignment and must not be applied
+        // to this local base_link cloud.
+        V3D p_imu = state_point.offset_R_L_I * p_lidar + state_point.offset_T_L_I;
+        V3D p_base = base_to_lio_R.transpose() * (p_imu - base_to_lio_t);
 
         PointType q = pt;
         q.x = p_base.x();
@@ -565,7 +571,7 @@ void transform_cloud_lio_to_base(const PointCloudXYZI::Ptr &src_lio, PointCloudX
 
     dst_base->width = dst_base->points.size();
     dst_base->height = 1;
-    dst_base->is_dense = src_lio->is_dense;
+    dst_base->is_dense = src_lidar->is_dense;
 }
 
 void publish_frame_base(const rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr &pub)
@@ -576,7 +582,7 @@ void publish_frame_base(const rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::
     }
 
     PointCloudXYZI::Ptr cloud_base(new PointCloudXYZI());
-    transform_cloud_lio_to_base(feats_undistort, cloud_base);
+    transform_cloud_to_base_frame(feats_undistort, cloud_base);
 
     sensor_msgs::msg::PointCloud2 msg;
     pcl::toROSMsg(*cloud_base, msg);
