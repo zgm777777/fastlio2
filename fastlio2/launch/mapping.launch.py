@@ -25,9 +25,11 @@ def generate_launch_description():
     base_output_gravity_align = LaunchConfiguration('base_output_gravity_align')
     base_output_publish_tf = LaunchConfiguration('base_output_publish_tf')
     base_output_publish_odom = LaunchConfiguration('base_output_publish_odom')
+    publish_base_cloud = LaunchConfiguration('publish_base_cloud')
     publish_aligned_cloud = LaunchConfiguration('publish_aligned_cloud')
     publish_aligned_map = LaunchConfiguration('publish_aligned_map')
     publish_aligned_path = LaunchConfiguration('publish_aligned_path')
+    base_cloud_topic = LaunchConfiguration('base_cloud_topic')
     aligned_cloud_topic = LaunchConfiguration('aligned_cloud_topic')
     aligned_map_topic = LaunchConfiguration('aligned_map_topic')
     aligned_path_topic = LaunchConfiguration('aligned_path_topic')
@@ -68,6 +70,7 @@ def generate_launch_description():
             (base_output_gravity_align, 'base_output.gravity_align'),
             (base_output_publish_tf, 'base_output.publish_tf'),
             (base_output_publish_odom, 'base_output.publish_odom'),
+            (publish_base_cloud, 'base_output.publish_base_cloud'),
             (publish_aligned_cloud, 'base_output.publish_aligned_cloud'),
             (publish_aligned_map, 'base_output.publish_aligned_map'),
             (publish_aligned_path, 'base_output.publish_aligned_path'),
@@ -78,6 +81,7 @@ def generate_launch_description():
                 overrides[parameter_name] = value
 
         string_overrides = (
+            (base_cloud_topic, 'base_output.base_cloud_topic'),
             (aligned_cloud_topic, 'base_output.aligned_cloud_topic'),
             (aligned_map_topic, 'base_output.aligned_map_topic'),
             (aligned_path_topic, 'base_output.aligned_path_topic'),
@@ -157,6 +161,10 @@ def generate_launch_description():
         'base_output_publish_odom', default_value='',
         description='Optional override for base_output.publish_odom'
     )
+    declare_publish_base_cloud_cmd = DeclareLaunchArgument(
+        'publish_base_cloud', default_value='',
+        description='Optional override for base_output.publish_base_cloud'
+    )
     declare_publish_aligned_cloud_cmd = DeclareLaunchArgument(
         'publish_aligned_cloud', default_value='',
         description='Optional override for base_output.publish_aligned_cloud'
@@ -172,6 +180,10 @@ def generate_launch_description():
     declare_aligned_cloud_topic_cmd = DeclareLaunchArgument(
         'aligned_cloud_topic', default_value='',
         description='Optional override for base_output.aligned_cloud_topic'
+    )
+    declare_base_cloud_topic_cmd = DeclareLaunchArgument(
+        'base_cloud_topic', default_value='',
+        description='Optional override for base_output.base_cloud_topic'
     )
     declare_aligned_map_topic_cmd = DeclareLaunchArgument(
         'aligned_map_topic', default_value='',
@@ -216,9 +228,11 @@ def generate_launch_description():
     ld.add_action(declare_base_output_gravity_align_cmd)
     ld.add_action(declare_base_output_publish_tf_cmd)
     ld.add_action(declare_base_output_publish_odom_cmd)
+    ld.add_action(declare_publish_base_cloud_cmd)
     ld.add_action(declare_publish_aligned_cloud_cmd)
     ld.add_action(declare_publish_aligned_map_cmd)
     ld.add_action(declare_publish_aligned_path_cmd)
+    ld.add_action(declare_base_cloud_topic_cmd)
     ld.add_action(declare_aligned_cloud_topic_cmd)
     ld.add_action(declare_aligned_map_topic_cmd)
     ld.add_action(declare_aligned_path_topic_cmd)

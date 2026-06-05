@@ -23,6 +23,8 @@
             publish_odom: true
             publish_tf: true
             odom_topic: "/nav_odom"
+            publish_base_cloud: true
+            base_cloud_topic: "/cloud_registered_base"
             gravity_align: true
             gravity_align_fixed_once: true
             publish_aligned_cloud: true
