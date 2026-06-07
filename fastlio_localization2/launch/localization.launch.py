@@ -1,7 +1,7 @@
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
 from launch.conditions import IfCondition
-from launch.substitutions import LaunchConfiguration, PathJoinSubstitution, PythonExpression
+from launch.substitutions import LaunchConfiguration, PythonExpression
 from launch_ros.actions import Node
 from ament_index_python.packages import get_package_share_directory
 
@@ -10,12 +10,9 @@ import os
 
 def generate_launch_description():
     package_path = get_package_share_directory("fast_lio_localization")
-    default_config_path = os.path.join(package_path, "config")
     default_rviz_config_path = os.path.join(package_path, "rviz", "fastlio_localization.rviz")
 
     use_sim_time = LaunchConfiguration("use_sim_time")
-    config_path = LaunchConfiguration("config_path")
-    config_file = LaunchConfiguration("config_file")
     rviz_use = LaunchConfiguration("rviz")
     rviz_cfg = LaunchConfiguration("rviz_cfg")
     pcd_map_topic = LaunchConfiguration("pcd_map_topic")
@@ -36,17 +33,10 @@ def generate_launch_description():
     map_frame = LaunchConfiguration("map_frame")
     odom_frame = LaunchConfiguration("odom_frame")
     base_frame = LaunchConfiguration("base_frame")
-    use_internal_fastlio = LaunchConfiguration("use_internal_fastlio")
 
     # Declare arguments
     declare_use_sim_time_cmd = DeclareLaunchArgument(
         "use_sim_time", default_value="false", description="Use simulation (Gazebo) clock if true"
-    )
-    declare_config_path_cmd = DeclareLaunchArgument(
-        "config_path", default_value=default_config_path, description="Yaml config file path"
-    )
-    declare_config_file_cmd = DeclareLaunchArgument(
-        "config_file", default_value="mid360.yaml", description="Config file"
     )
     declare_rviz_cmd = DeclareLaunchArgument("rviz", default_value="true", description="Use RViz to monitor results")
 
@@ -71,20 +61,7 @@ def generate_launch_description():
     declare_map_frame = DeclareLaunchArgument("map_frame", default_value="map", description="Map frame")
     declare_odom_frame = DeclareLaunchArgument("odom_frame", default_value="odom", description="Odometry frame")
     declare_base_frame = DeclareLaunchArgument("base_frame", default_value="base_link", description="Robot base frame")
-    declare_use_internal_fastlio = DeclareLaunchArgument(
-        "use_internal_fastlio",
-        default_value="false",
-        description="Start the bundled FAST-LIO mapping node if true",
-    )
-    # Load parameters from yaml file
 
-    fast_lio_node = Node(
-        package="fast_lio_localization",
-        executable="fastlio_mapping",
-        parameters=[PathJoinSubstitution([config_path, config_file]), {"use_sim_time": use_sim_time}],
-        condition=IfCondition(use_internal_fastlio),
-        output="screen",
-    )
     # Global localization node
     global_localization_node = Node(
         package="fast_lio_localization",
@@ -141,8 +118,6 @@ def generate_launch_description():
 
     ld = LaunchDescription()
     ld.add_action(declare_use_sim_time_cmd)
-    ld.add_action(declare_config_path_cmd)
-    ld.add_action(declare_config_file_cmd)
     ld.add_action(declare_rviz_cmd)
     ld.add_action(declare_rviz_config_path_cmd)
     ld.add_action(declare_map_path)
@@ -154,9 +129,7 @@ def generate_launch_description():
     ld.add_action(declare_map_frame)
     ld.add_action(declare_odom_frame)
     ld.add_action(declare_base_frame)
-    ld.add_action(declare_use_internal_fastlio)
 
-    ld.add_action(fast_lio_node)
     ld.add_action(rviz_node)
     ld.add_action(global_localization_node)
     ld.add_action(transform_fusion_node)
