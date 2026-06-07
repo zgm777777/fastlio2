@@ -518,6 +518,7 @@ void map_incremental()
 }
 
 void init_gravity_alignment();
+bool ensure_gravity_alignment_ready();
 
 PointCloudXYZI::Ptr pcl_wait_pub(new PointCloudXYZI());
 PointCloudXYZI::Ptr pcl_wait_save(new PointCloudXYZI());
@@ -603,10 +604,7 @@ void publish_frame_world_aligned(
         return;
     }
 
-    if (base_output_gravity_align && (!gravity_align_initialized || !base_output_gravity_align_fixed_once))
-    {
-        init_gravity_alignment();
-    }
+    if (!ensure_gravity_alignment_ready()) return;
 
     PointCloudXYZI::Ptr cloud_aligned(new PointCloudXYZI());
     transform_cloud_to_aligned_world(laserCloudWorld, cloud_aligned);
@@ -626,10 +624,7 @@ void publish_map_aligned(const rclcpp::Publisher<sensor_msgs::msg::PointCloud2>:
         return;
     }
 
-    if (base_output_gravity_align && (!gravity_align_initialized || !base_output_gravity_align_fixed_once))
-    {
-        init_gravity_alignment();
-    }
+    if (!ensure_gravity_alignment_ready()) return;
 
     PointCloudXYZI::Ptr map_aligned(new PointCloudXYZI());
     transform_cloud_to_aligned_world(pcl_wait_pub, map_aligned);
@@ -644,27 +639,41 @@ void publish_map_aligned(const rclcpp::Publisher<sensor_msgs::msg::PointCloud2>:
 
 void publish_frame_world(rclcpp::Publisher<sensor_msgs::msg::PointCloud2>::SharedPtr pubLaserCloudFull)
 {
-    if(scan_pub_en)
+    bool need_original_world_cloud = scan_pub_en && pubLaserCloudFull;
+    bool need_aligned_world_cloud =
+        base_output_enable &&
+        base_output_publish_aligned_cloud &&
+        pubLaserCloudFullResAligned;
+
+    if (!need_original_world_cloud && !need_aligned_world_cloud)
     {
-        PointCloudXYZI::Ptr laserCloudFullRes(dense_pub_en ? feats_undistort : feats_down_body);
-        int size = laserCloudFullRes->points.size();
-        PointCloudXYZI::Ptr laserCloudWorld( \
-                        new PointCloudXYZI(size, 1));
+        return;
+    }
 
-        for (int i = 0; i < size; i++)
-        {
-            RGBpointBodyToWorld(&laserCloudFullRes->points[i], \
-                                &laserCloudWorld->points[i]);
-        }
+    PointCloudXYZI::Ptr laserCloudFullRes(dense_pub_en ? feats_undistort : feats_down_body);
+    int size = laserCloudFullRes->points.size();
+    PointCloudXYZI::Ptr laserCloudWorld(new PointCloudXYZI(size, 1));
 
+    for (int i = 0; i < size; i++)
+    {
+        RGBpointBodyToWorld(&laserCloudFullRes->points[i],
+                            &laserCloudWorld->points[i]);
+    }
+
+    if (need_original_world_cloud)
+    {
         sensor_msgs::msg::PointCloud2 laserCloudmsg;
         pcl::toROSMsg(*laserCloudWorld, laserCloudmsg);
         // laserCloudmsg.header.stamp = ros::Time().fromSec(lidar_end_time);
         laserCloudmsg.header.stamp = get_ros_time(lidar_end_time);
         laserCloudmsg.header.frame_id = "camera_init";
         pubLaserCloudFull->publish(laserCloudmsg);
-        publish_frame_world_aligned(pubLaserCloudFullResAligned, laserCloudWorld);
         publish_count -= PUBFRAME_PERIOD;
+    }
+
+    if (need_aligned_world_cloud)
+    {
+        publish_frame_world_aligned(pubLaserCloudFullResAligned, laserCloudWorld);
     }
 
     /**************** save map ****************/
@@ -771,10 +780,7 @@ void save_to_pcd()
 
     if (base_output_enable && base_output_save_aligned_map)
     {
-        if (base_output_gravity_align && (!gravity_align_initialized || !base_output_gravity_align_fixed_once))
-        {
-            init_gravity_alignment();
-        }
+        if (!ensure_gravity_alignment_ready()) return;
 
         PointCloudXYZI::Ptr map_aligned(new PointCloudXYZI());
         transform_cloud_to_aligned_world(pcl_wait_pub, map_aligned);
@@ -811,7 +817,9 @@ void set_posestamp(T & out)
 void init_gravity_alignment()
 {
     static bool gravity_debug_printed = false;
-    static bool gravity_debug_small_norm_printed = false;
+    static bool gravity_wait_log_printed = false;
+    static bool gravity_invalid_norm_log_printed = false;
+    static bool gravity_default_log_printed = false;
 
     if (!base_output_gravity_align)
     {
@@ -826,41 +834,51 @@ void init_gravity_alignment()
     }
 
     V3D grav = state_point.grav;
-    if (grav.norm() < 1e-3)
+    if (!flg_EKF_inited || !Localmap_Initialized)
     {
-        if (!gravity_debug_small_norm_printed)
+        if (!gravity_wait_log_printed)
         {
             RCLCPP_WARN(rclcpp::get_logger("laser_mapping"),
-                        "[gravity_align_debug] grav norm too small: grav=[%.6f, %.6f, %.6f], norm=%.6f",
-                        grav.x(), grav.y(), grav.z(), grav.norm());
-            gravity_debug_small_norm_printed = true;
+                        "[gravity_align] Waiting for FAST-LIO initialization: flg_EKF_inited=%d, Localmap_Initialized=%d. Skip gravity alignment for now.",
+                        static_cast<int>(flg_EKF_inited),
+                        static_cast<int>(Localmap_Initialized));
+            gravity_wait_log_printed = true;
         }
-        gravity_align_R = M3D::Identity();
         return;
     }
 
-    if (!gravity_debug_printed)
+    double g_norm = grav.norm();
+    if (g_norm < 8.0 || g_norm > 11.5)
     {
-        V3D grav_norm = grav.normalized();
-        V3D up_by_neg_grav = -grav_norm;
-        V3D up_by_pos_grav = grav_norm;
-
-        RCLCPP_INFO(rclcpp::get_logger("laser_mapping"),
-                    "[gravity_align_debug] grav = [%.6f, %.6f, %.6f], norm = %.6f",
-                    grav.x(), grav.y(), grav.z(), grav.norm());
-        RCLCPP_INFO(rclcpp::get_logger("laser_mapping"),
-                    "[gravity_align_debug] grav.normalized = [%.6f, %.6f, %.6f]",
-                    grav_norm.x(), grav_norm.y(), grav_norm.z());
-        RCLCPP_INFO(rclcpp::get_logger("laser_mapping"),
-                    "[gravity_align_debug] -grav.normalized = [%.6f, %.6f, %.6f]",
-                    up_by_neg_grav.x(), up_by_neg_grav.y(), up_by_neg_grav.z());
-        RCLCPP_INFO(rclcpp::get_logger("laser_mapping"),
-                    "[gravity_align_debug] +grav.normalized = [%.6f, %.6f, %.6f]",
-                    up_by_pos_grav.x(), up_by_pos_grav.y(), up_by_pos_grav.z());
+        if (!gravity_invalid_norm_log_printed)
+        {
+            RCLCPP_WARN(rclcpp::get_logger("laser_mapping"),
+                        "[gravity_align] Invalid gravity norm %.6f, skip initialization. grav=[%.6f %.6f %.6f]",
+                        g_norm, grav.x(), grav.y(), grav.z());
+            gravity_invalid_norm_log_printed = true;
+        }
+        return;
     }
 
-    bool was_initialized = gravity_align_initialized;
-    V3D up_lio = -grav.normalized();
+    bool looks_like_default_gravity =
+        std::fabs(grav.x() - 9.809) < 1e-3 &&
+        std::fabs(grav.y()) < 1e-3 &&
+        std::fabs(grav.z()) < 1e-3;
+    if (looks_like_default_gravity)
+    {
+        if (!gravity_default_log_printed)
+        {
+            RCLCPP_WARN(rclcpp::get_logger("laser_mapping"),
+                        "[gravity_align] Gravity looks like default state [9.809, 0, 0], skip initialization.");
+            gravity_default_log_printed = true;
+        }
+        return;
+    }
+
+    V3D grav_norm = grav.normalized();
+    V3D up_by_neg_grav = -grav_norm;
+    V3D up_by_pos_grav = grav_norm;
+    V3D up_lio = up_by_neg_grav;
     Eigen::Quaterniond q_align = Eigen::Quaterniond::FromTwoVectors(up_lio, Eigen::Vector3d::UnitZ());
     q_align.normalize();
 
@@ -869,7 +887,22 @@ void init_gravity_alignment()
     if (!gravity_debug_printed)
     {
         RCLCPP_INFO(rclcpp::get_logger("laser_mapping"),
-                    "[gravity_align_debug] selected up_lio = [%.6f, %.6f, %.6f]",
+                    "[gravity_align_debug] init at lidar_time=%.6f, flg_EKF_inited=%d, Localmap_Initialized=%d, grav=[%.6f %.6f %.6f], norm=%.6f",
+                    lidar_end_time,
+                    static_cast<int>(flg_EKF_inited),
+                    static_cast<int>(Localmap_Initialized),
+                    grav.x(), grav.y(), grav.z(), g_norm);
+        RCLCPP_INFO(rclcpp::get_logger("laser_mapping"),
+                    "[gravity_align_debug] grav.normalized = [%.6f %.6f %.6f]",
+                    grav_norm.x(), grav_norm.y(), grav_norm.z());
+        RCLCPP_INFO(rclcpp::get_logger("laser_mapping"),
+                    "[gravity_align_debug] -grav.normalized = [%.6f %.6f %.6f]",
+                    up_by_neg_grav.x(), up_by_neg_grav.y(), up_by_neg_grav.z());
+        RCLCPP_INFO(rclcpp::get_logger("laser_mapping"),
+                    "[gravity_align_debug] +grav.normalized = [%.6f %.6f %.6f]",
+                    up_by_pos_grav.x(), up_by_pos_grav.y(), up_by_pos_grav.z());
+        RCLCPP_INFO(rclcpp::get_logger("laser_mapping"),
+                    "[gravity_align_debug] selected up_lio = [%.6f %.6f %.6f]",
                     up_lio.x(), up_lio.y(), up_lio.z());
         RCLCPP_INFO(rclcpp::get_logger("laser_mapping"),
                     "[gravity_align_debug] gravity_align_R = [[%.6f %.6f %.6f], [%.6f %.6f %.6f], [%.6f %.6f %.6f]]",
@@ -878,10 +911,25 @@ void init_gravity_alignment()
                     gravity_align_R(2, 0), gravity_align_R(2, 1), gravity_align_R(2, 2));
         gravity_debug_printed = true;
     }
-    if (!was_initialized)
+}
+
+bool ensure_gravity_alignment_ready()
+{
+    if (!base_output_gravity_align)
     {
-        RCLCPP_INFO(rclcpp::get_logger("laser_mapping"), "Gravity alignment initialized for base output.");
+        if (!gravity_align_initialized)
+        {
+            init_gravity_alignment();
+        }
+        return true;
     }
+
+    if (!gravity_align_initialized || !base_output_gravity_align_fixed_once)
+    {
+        init_gravity_alignment();
+    }
+
+    return gravity_align_initialized;
 }
 
 void get_aligned_base_pose(V3D &base_pos, M3D &base_rot)
@@ -894,11 +942,6 @@ void get_aligned_base_pose(V3D &base_pos, M3D &base_rot)
 
     if (base_output_gravity_align)
     {
-        if (!gravity_align_initialized || !base_output_gravity_align_fixed_once)
-        {
-            init_gravity_alignment();
-        }
-
         base_rot = gravity_align_R * base_R_in_lio_world;
         base_pos = gravity_align_R * base_p_in_lio_world;
     }
@@ -943,6 +986,8 @@ void publish_odometry(const rclcpp::Publisher<nav_msgs::msg::Odometry>::SharedPt
 
     if (base_output_enable)
     {
+        if (!ensure_gravity_alignment_ready()) return;
+
         V3D base_pos;
         M3D base_rot;
         get_aligned_base_pose(base_pos, base_rot);
@@ -1513,7 +1558,7 @@ private:
             
             /******* Publish points *******/
             if (path_en)                         publish_path(pubPath_);
-            if (scan_pub_en)      publish_frame_world(pubLaserCloudFull_);
+            publish_frame_world(pubLaserCloudFull_);
             if (scan_pub_en && scan_body_pub_en) publish_frame_body(pubLaserCloudFull_body_);
             publish_frame_base(pubCloudRegisteredBase);
             if (effect_pub_en) publish_effect_world(pubLaserCloudEffect_);
