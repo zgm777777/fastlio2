@@ -1,0 +1,18 @@
+global_localization:
+  ros__parameters:
+    scan_topic: "/cloud_registered_aligned"
+    odom_topic: "/nav_odom"
+    initialpose_topic: "/initialpose"
+    map_frame: "map"
+    odom_frame: "odom"
+    base_frame: "base_link"
+    pcd_map_path: "/path/to/aligned_or_pgo_map.pcd"
+
+transform_fusion:
+  ros__parameters:
+    odom_topic: "/nav_odom"
+    map_to_odom_topic: "/map_to_odom"
+    map_frame: "map"
+    odom_frame: "odom"
+    base_frame: "base_link"
+    publish_tf: true
